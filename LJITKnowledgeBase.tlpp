@@ -25,9 +25,10 @@ Class LJITKnowledgeBase
     public  Method  add()                   //Adiciona um novo anexo na array
     public  Method  remove()                //Marca o anexo como deletado na array
     public  Method  save()                  //Salva no banco e no servidor os anexos
+    public  Method  download()              //Baixa os anexos para o diretório destino informado
 EndClass
 
-Method New(cAlias,nRecno) Class LJITKnowledgeBase
+Method New(cAlias as character,nRecno as numeric) Class LJITKnowledgeBase
     Default cAlias  := ""
     Default nRecno  := 0
 
@@ -90,7 +91,7 @@ Method getAttachs() Class LJITKnowledgeBase
 Return self:aAttachs
 
 //Ajusta a entidade para poder salvar os registros
-Method setEntity(cAlias,nRecno) Class LJITKnowledgeBase
+Method setEntity(cAlias as character,nRecno as numeric) Class LJITKnowledgeBase
     Local	aEntidade	as array
     Local   aChave      as array
     Local	cUnico		as character
@@ -126,12 +127,12 @@ Method setEntity(cAlias,nRecno) Class LJITKnowledgeBase
 Return 
 
 //Adiciona um novo arquivo na array 
-Method add(cPathFile) Class LJITKnowledgeBase
+Method add(cPathFile as character) Class LJITKnowledgeBase
     aAdd(self:aAttachs,{cPathFile,.F.,0})
 Return
 
 //Marca o arquivo para ser removido
-Method remove(nPos) Class LJITKnowledgeBase
+Method remove(nPos as numeric) Class LJITKnowledgeBase
     self:aAttachs[nPos][2] := .T.
 Return
 
@@ -243,4 +244,18 @@ Method save() Class LJITKnowledgeBase
 
     Next nX
 
+Return
+
+//Baixa os anexos para o diretório destino
+Method download(cPathDestiny as character) Class lJITKnowledgeBase
+    Local   nX              as numeric
+    Default cPathDestiny    := ""
+
+    //Verifica se o diretório existe
+    If ExistDir(cPathDestiny)
+        //Percorre os anexos copiando para o diretório destino
+        For nX := 1 To Len(self:aAttachs)
+            CpyS2T(self:aAttachs[nX][1],cPathDestiny)
+        Next nX
+    EndIf
 Return

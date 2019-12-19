@@ -1,0 +1,246 @@
+#include "totvs.ch"
+
+#define ATTACH_POSITION_PATH    1
+#define ATTACH_POSITION_DELETED 2
+#define ATTACH_POSITION_RECNO   3
+
+/*/{Protheus.doc} LJITKnowledgeBase
+Classe responsável por efetuar anexos no sistema,
+baseado nas rotinas padrões.
+@author Matheus José da Cunha
+@since 02/12/2019
+@version 1.0
+    /*/
+Class LJITKnowledgeBase
+    private Data    aAttachs    as array
+    private Data    cAlias      as character
+    private Data    cEntity     as character
+    private Data    cDir        as character
+    private Data    nRecno      as numeric
+
+    //Públicos
+    public  Method  New()    CONSTRUCTOR    //Constrói a classe
+    public  Method  getAttachs()            //Retorna os anexos
+    public  Method  setEntity()             //Ajusta a entidade 
+    public  Method  add()                   //Adiciona um novo anexo na array
+    public  Method  remove()                //Marca o anexo como deletado na array
+    public  Method  save()                  //Salva no banco e no servidor os anexos
+EndClass
+
+Method New(cAlias,nRecno) Class LJITKnowledgeBase
+    Default cAlias  := ""
+    Default nRecno  := 0
+
+    self:cDir       := "\system\"
+    self:cAlias     := cAlias
+    self:nRecno     := nRecno
+    self:aAttachs   := getAttachs()
+Return 
+
+//Retorna os anexos
+Method getAttachs() Class LJITKnowledgeBase
+    Local   aParams     as array
+    Local   cQuery      as character
+    Local   cAliasQry   as character
+
+    //Verifica deve verificar registros já existentes
+    If ! Empty(self:cAlias) .and. self:nRecno > 0
+        setEntity()
+
+        aParams     := {}
+        cAliasQry   := getNextAlias()
+
+        aAdd(aParams,xFilial("AC9"))
+        aAdd(aParams,xFilial(self:cAlias))
+        aAdd(aParams,self:cAlias)
+        aAdd(aParams,self:cEntity)
+
+        //Busca os anexos
+        cQuery := " SELECT AC9.AC9_CODOBJ,ACB.R_E_C_N_O_,ACB.ACB_OBJETO,ACB.ACB_DESCRI"
+        cQuery += " FROM " + RetSqlName("AC9") + " AC9"
+        cQuery += " INNER JOIN " + RetSqlName("ACB") + " ACB ON(ACB.ACB_FILIAL = AC9.AC9_FILIAL"
+        cQuery += "                                             AND ACB.ACB_CODOBJ = AC9.AC9_CODOBJ"
+        cQuery += "                                             AND ACB.D_E_L_E_T_ = ' ')"
+        cQuery += " WHERE AC9.AC9_FILIAL = ?"
+        cQuery += " AND AC9.AC9_FILENT = ?"
+        cQuery += " AND AC9.AC9_ENTIDA = ?"
+        cQuery += " AND AC9.AC9_CODENT = ?"
+        cQuery += " AND AC9.D_E_L_E_T_ = ' '"
+        cQuery += " ORDER BY AC9.R_E_C_N_O_ DESC"
+        oStm := FwPreparedStatement():New(cQuery)
+        oStm:setParams(aParams)
+        cQuery := oStm:getFixQuery()
+        oStm:destroy()
+        MPSysOpenQuery(cQuery,cAliasQry)
+
+        (cAliasQry)->(dbGoTop())
+
+        While (cAliasQry)->( ! EoF() )
+            
+            aAdd(self:aAttachs,{self:cDir+(cAliasQry)->ACB_OBJETO,; //Caminho do arquivo no servidor
+            .F.,; //deletada?
+            (cAliasQry)->R_E_C_N_O_}) //Recno da ACB
+
+            (cAliasQry)->(dbSkip())
+        EndDo
+
+        (cAliasQry)->(dbCloseArea())
+    EndIf
+
+Return self:aAttachs
+
+//Ajusta a entidade para poder salvar os registros
+Method setEntity(cAlias,nRecno) Class LJITKnowledgeBase
+    Local	aEntidade	as array
+    Local   aChave      as array
+    Local	cUnico		as character
+    Local	nScan		as numeric
+    Default	cAlias	    := self:cAlias
+    Default	nRecno	    := self:nRecno
+
+    //Inicializa as variáveis
+    self:cAlias     := cAlias
+    self:nRecno     := nRecno
+
+    dbSelectArea(cAlias)
+    MsGoTo(nRecno)
+
+    //Pega as chaves de relação
+    aEntidade	:= MsRelation()
+
+    nScan := aScan( aEntidade, { |x| x[1] == cAlias } )
+
+    If nScan > 0
+        aChave   := aEntidade[ nScan, 2 ]
+        self:cEntity  := MaBuildKey(cAlias,aChave)
+    Else
+        SX2->(dbSetOrder(1))
+        If SX2->(dbSeek(cAlias))
+            If ! Empty(SX2->X2_UNICO)
+                cUnico   := SX2->X2_UNICO
+                dbSelectArea(cAlias)
+                self:cEntity  := &cUnico
+            EndIf
+        EndIf
+    EndIf
+Return 
+
+//Adiciona um novo arquivo na array 
+Method add(cPathFile) Class LJITKnowledgeBase
+    aAdd(self:aAttachs,{cPathFile,.F.,0})
+Return
+
+//Marca o arquivo para ser removido
+Method remove(nPos) Class LJITKnowledgeBase
+    self:aAttachs[nPos][2] := .T.
+Return
+
+//Salva os anexos
+Method save() Class LJITKnowledgeBase
+    Local   cCodObj     as character
+    Local   cNameFile   as character
+    Local   cNameAux    as character
+    Local   cDrive      as character
+    Local   cDir        as character
+    Local   cNameFile   as character
+    Local   cExt        as character
+    Local   cFileCopy   as character
+    Local   nX          as numeric
+
+    For nX := 1 To Len(self:aAttachs)
+
+        dbSelectArea("AC9")
+        AC9->(dbSetOrder(1))
+        AC9->(dbGoTop())
+
+        dbSelectArea("ACB")
+        ACB->(dbSetOrder(1))
+        ACB->(dbGoTop())
+
+        Begin Transaction
+        
+            //Verifica se está marcado para deletar
+            If self:aAttachs[nX][ATTACH_POSITION_DELETED] .and self:aAttachs[nX][ATTACH_POSITION_RECNO] > 0
+                ACB->(dbGoTo(self:aAttachs[nX][ATTACH_POSITION_RECNO]))
+
+                //Resgata o código de objeto
+                cCodObj := ACB->ACB_CODOBJ 
+
+                If RecLock("ACB",.F.)
+                    ACB->(dbDelete())
+                    ACB->(msUnlock())
+                Else
+                    DisarmTransaction()
+                EndIf
+
+                If AC9->(dbSeek(xFilial(self:cAlias)+cCodObj))
+                    RecLock("AC9",.F.)
+                    AC9->(dbDelete())
+                    AC9->(msUnlock())
+                Else
+                    DisarmTransaction()
+                EndIf
+
+                ///Deleta o arquivo do servidor
+                FErase(self:cDir+ACB->ACB_OBJETO)
+            Else
+                //Resgata o nome do arquivo e sua extensão
+                SplitPath (self:aAttachs[nX][ATTACH_POSITION_PATH],@cDrive,@cDir,@cNameFile,@cExt) 
+
+                cNameAux := cNameFile
+                
+                //Se existir o arquivo, gera um novo nome
+                If File(self:cDir+cNameAux+cExt)
+                    cNameAux := cNameFile+"_"+FwTimestamp()
+                EndIf
+
+                //Verifica o próximo código de objeto disponível
+                cCodObj	:= GetSxeNum("ACB","ACB_CODOBJ")
+                While AC9->(dbSeek(xFilial("AC9")+cCodObj+self:cAlias+xFilial(self:cAlias)+self:cEntity))
+                    cCodObj	:= getSxeNum("ACB","ACB_CODOBJ")
+                EndDo
+                confirmSX8()
+
+                If ! AC9->(DbSeek(xFilial("AC9")+cCodObj+self:cAlias+xFilial(self:cAlias)+self:cEntity))
+                    If RecLock("AC9",.T.)
+                        Replace AC9->AC9_FILIAL	With	xFilial("AC9")
+                        Replace	AC9->AC9_FILENT	With	xFilial(self:cAlias)
+                        Replace	AC9->AC9_ENTIDA	With	self:cAlias
+                        Replace	AC9->AC9_CODOBJ	With	cCodObj
+                        Replace	AC9->AC9_CODENT	With	self:cEntity
+                        AC9->(MsUnlock())
+                    Else
+                        DisarmTransaction()
+                    EndIf
+                EndIf
+
+                If ! ACB->(DbSeek(xFilial("ACB")+cCodObj))
+                    If RecLock("ACB",.T.)
+                        Replace	ACB->ACB_FILIAL	With	xFilial("ACB")
+                        Replace	ACB->ACB_CODOBJ	With	cCodObj
+                        Replace	ACB->ACB_OBJETO	With	cNameAux+"."+cExt
+                        Replace	ACB->ACB_DESCRI	With	cNameFile
+                        ACB->(MsUnlock())
+                    Else
+                        DisarmTransaction()
+                    EndIf
+                EndIf
+
+                //Copia o arquivo para o servidor
+                cFileCopy := GetTempPath()+cNameAux+"."+cExt
+                __CopyFile(self:aAttachs[nX][ATTACH_POSITION_PATH],cFileCopy)
+                If File(cFileCopy)
+                    //Move para o servidor
+                    If ! CpyT2S(cFileCopy,self:cDir)
+                        DisarmTransaction()
+                    EndIf 
+                EndIf
+
+        End Transaction
+
+        AC9->(dbCloseArea())
+        ACB->(dbCloseArea())
+
+    Next nX
+
+Return

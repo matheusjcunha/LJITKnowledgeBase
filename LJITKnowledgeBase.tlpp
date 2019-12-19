@@ -142,7 +142,6 @@ Method save() Class LJITKnowledgeBase
     Local   cNameAux    as character
     Local   cDrive      as character
     Local   cDir        as character
-    Local   cNameFile   as character
     Local   cExt        as character
     Local   cFileCopy   as character
     Local   nX          as numeric
@@ -160,7 +159,7 @@ Method save() Class LJITKnowledgeBase
         Begin Transaction
         
             //Verifica se está marcado para deletar
-            If self:aAttachs[nX][ATTACH_POSITION_DELETED] .and self:aAttachs[nX][ATTACH_POSITION_RECNO] > 0
+            If self:aAttachs[nX][ATTACH_POSITION_DELETED] .and. self:aAttachs[nX][ATTACH_POSITION_RECNO] > 0
                 ACB->(dbGoTo(self:aAttachs[nX][ATTACH_POSITION_RECNO]))
 
                 //Resgata o código de objeto
@@ -235,6 +234,7 @@ Method save() Class LJITKnowledgeBase
                         DisarmTransaction()
                     EndIf 
                 EndIf
+            EndIf
 
         End Transaction
 

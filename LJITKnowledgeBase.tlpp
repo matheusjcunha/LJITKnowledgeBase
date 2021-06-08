@@ -1,13 +1,13 @@
 #include "totvs.ch"
 
-#define ATTACH_POSITION_PATH    1
-#define ATTACH_POSITION_DELETED 2
-#define ATTACH_POSITION_RECNO   3
+Static ATTACH_POSITION_PATH     := 1
+Static ATTACH_POSITION_DELETED  := 2
+Static ATTACH_POSITION_RECNO    := 3
 
 /*/{Protheus.doc} LJITKnowledgeBase
 Classe responsável por efetuar anexos no sistema,
 baseado nas rotinas padrões.
-@author Matheus José da Cunha
+@author Matheus José da Cunha - LoremJ IT
 @since 02/12/2019
 @version 1.0
     /*/
@@ -28,14 +28,16 @@ Class LJITKnowledgeBase
     public  Method  download()              //Baixa os anexos para o diretório destino informado
 EndClass
 
-Method New(cAlias as character,nRecno as numeric) Class LJITKnowledgeBase
+Method New(cAlias as character,nRecno as numeric,cDir as character) Class LJITKnowledgeBase
     Default cAlias  := ""
     Default nRecno  := 0
+    Default cDir    := ""
 
-    self:cDir       := "\system\"
+    self:cDir       := "\dirdoc\bconhecimento\shared\"
     self:cAlias     := cAlias
     self:nRecno     := nRecno
-    self:aAttachs   := getAttachs()
+    self:aAttachs   := {}
+    self:aAttachs   := self:getAttachs() //Resgata os anexos já salvos caso seja informado o alias e recno na construção da classe
 Return 
 
 //Retorna os anexos
@@ -46,7 +48,7 @@ Method getAttachs() Class LJITKnowledgeBase
 
     //Verifica deve verificar registros já existentes
     If ! Empty(self:cAlias) .and. self:nRecno > 0
-        setEntity()
+        self:setEntity()
 
         aParams     := {}
         cAliasQry   := getNextAlias()
@@ -94,7 +96,9 @@ Return self:aAttachs
 Method setEntity(cAlias as character,nRecno as numeric) Class LJITKnowledgeBase
     Local	aEntidade	as array
     Local   aChave      as array
-    Local	cUnico		as character
+    Local   aPE         as array
+    //Local	cUnico		as character
+    Local   nX          as numeric
     Local	nScan		as numeric
     Default	cAlias	    := self:cAlias
     Default	nRecno	    := self:nRecno
@@ -109,12 +113,20 @@ Method setEntity(cAlias as character,nRecno as numeric) Class LJITKnowledgeBase
     //Pega as chaves de relação
     aEntidade	:= MsRelation()
 
+	//Adiciona as entidades do ponto de entrada
+	If ExistBlock("FTMSREL")
+		aPE := ExecBlock("FTMSREL",.F.,.F.)
+		For nX := 1 To Len(aPE)
+			aAdd(aEntidade,aPE[nX])
+		Next nX
+	EndIf
+
     nScan := aScan( aEntidade, { |x| x[1] == cAlias } )
 
     If nScan > 0
         aChave   := aEntidade[ nScan, 2 ]
         self:cEntity  := MaBuildKey(cAlias,aChave)
-    Else
+    /*Else
         SX2->(dbSetOrder(1))
         If SX2->(dbSeek(cAlias))
             If ! Empty(SX2->X2_UNICO)
@@ -122,7 +134,7 @@ Method setEntity(cAlias as character,nRecno as numeric) Class LJITKnowledgeBase
                 dbSelectArea(cAlias)
                 self:cEntity  := &cUnico
             EndIf
-        EndIf
+        EndIf*/
     EndIf
 Return 
 
@@ -133,11 +145,13 @@ Return
 
 //Marca o arquivo para ser removido
 Method remove(nPos as numeric) Class LJITKnowledgeBase
-    self:aAttachs[nPos][2] := .T.
+    self:aAttachs[nPos][ATTACH_POSITION_DELETED] := .T.
 Return
 
 //Salva os anexos
+//@return aRet, array, código de objetos gerado
 Method save() Class LJITKnowledgeBase
+    Local   aRet        as array
     Local   cCodObj     as character
     Local   cNameFile   as character
     Local   cNameAux    as character
@@ -146,6 +160,8 @@ Method save() Class LJITKnowledgeBase
     Local   cExt        as character
     Local   cFileCopy   as character
     Local   nX          as numeric
+
+    aRet    := {}
 
     For nX := 1 To Len(self:aAttachs)
 
@@ -190,9 +206,9 @@ Method save() Class LJITKnowledgeBase
                 cNameAux := cNameFile
                 
                 //Se existir o arquivo, gera um novo nome
-                If File(self:cDir+cNameAux+cExt)
+                While File(self:cDir+cNameAux+cExt)
                     cNameAux := cNameFile+"_"+FwTimestamp()
-                EndIf
+                EndDo
 
                 //Verifica o próximo código de objeto disponível
                 cCodObj	:= GetSxeNum("ACB","ACB_CODOBJ")
@@ -200,6 +216,9 @@ Method save() Class LJITKnowledgeBase
                     cCodObj	:= getSxeNum("ACB","ACB_CODOBJ")
                 EndDo
                 confirmSX8()
+
+                //Adiciona o código de objeto na array de retorno
+                aAdd(aRet,cCodObj)
 
                 If ! AC9->(DbSeek(xFilial("AC9")+cCodObj+self:cAlias+xFilial(self:cAlias)+self:cEntity))
                     If RecLock("AC9",.T.)
@@ -210,6 +229,7 @@ Method save() Class LJITKnowledgeBase
                         Replace	AC9->AC9_CODENT	With	self:cEntity
                         AC9->(MsUnlock())
                     Else
+                        aRet := {}
                         DisarmTransaction()
                     EndIf
                 EndIf
@@ -218,20 +238,34 @@ Method save() Class LJITKnowledgeBase
                     If RecLock("ACB",.T.)
                         Replace	ACB->ACB_FILIAL	With	xFilial("ACB")
                         Replace	ACB->ACB_CODOBJ	With	cCodObj
-                        Replace	ACB->ACB_OBJETO	With	cNameAux+"."+cExt
+                        Replace	ACB->ACB_OBJETO	With	cNameAux+cExt
                         Replace	ACB->ACB_DESCRI	With	cNameFile
+
+                        //---------------------------------------------------------
+                        //--------------------CAMPOS CUSTOMIZADOS------------------
+                        //---------------------------------------------------------
+                        If ACB->(FieldPos("ACB_DTINC")) > 0
+                            Replace	ACB->ACB_DTINC	With	MsDate()
+                        EndIf
+
+                        If ACB->(FieldPos("ACB_USRINC")) > 0
+                            Replace	ACB->ACB_USRINC	With	UsrRetName(RetCodUsr())
+                        EndIf
+
                         ACB->(MsUnlock())
                     Else
+                        aRet := {}
                         DisarmTransaction()
                     EndIf
                 EndIf
 
                 //Copia o arquivo para o servidor
-                cFileCopy := GetTempPath()+cNameAux+"."+cExt
+                cFileCopy := GetTempPath()+cNameAux+cExt
                 __CopyFile(self:aAttachs[nX][ATTACH_POSITION_PATH],cFileCopy)
                 If File(cFileCopy)
                     //Move para o servidor
                     If ! CpyT2S(cFileCopy,self:cDir)
+                        aRet := {}
                         DisarmTransaction()
                     EndIf 
                 EndIf
@@ -244,7 +278,7 @@ Method save() Class LJITKnowledgeBase
 
     Next nX
 
-Return
+Return aRet
 
 //Baixa os anexos para o diretório destino
 Method download(cPathDestiny as character) Class lJITKnowledgeBase

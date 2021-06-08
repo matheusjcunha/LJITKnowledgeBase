@@ -1,0 +1,14 @@
+#include "totvs.ch"
+
+/*/{Protheus.doc} User Function LJITDOC
+Inteface visual para Anexos de arquivos
+com auxílio da classe LJITKnowledgeBase.
+@type  Function
+@author Matheus José da Cunha
+@since 19/12/2019
+ /*/
+User Function LJITDOC()
+    Private oDlgDoc as object
+    
+    
+Return 

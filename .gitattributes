@@ -1,3 +1,4 @@
 *.tlpp linguist-detectable=true
 *.prw linguist-detectable=true
-
+*.tlpp linguist-language=TLPP
+*.prw linguist-language=ADVPL
